@@ -37,6 +37,14 @@ for cmd in curl jq; do
   fi
 done
 
+if command -v nproc > /dev/null 2>&1; then
+  jobs=$(nproc)
+elif sysctl -n hw.ncpu > /dev/null 2>&1; then
+  jobs=$(sysctl -n hw.ncpu)
+else
+  jobs=4
+fi
+
 slug() {
   printf '%s' "$1" \
     | iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null \
@@ -82,17 +90,17 @@ api_count=$(jq length "$all_apis")
 echo "Found $api_count APIs."
 echo ""
 
-# ── Download each OAS spec ───────────────────────────────────────────────
+# ── Build download manifest ──────────────────────────────────────────────
 
-echo "Downloading OpenAPI specs to $output_dir ..."
+echo "Preparing downloads ..."
 mkdir -p "$output_dir"
 
-fetched=0
+urls=()
+paths=()
+labels=()
 cached=0
-current=0
 
 while IFS= read -r api; do
-  current=$((current + 1))
   id=$(jq -r '.id' <<< "$api")
   title=$(jq -r '.title' <<< "$api")
   org_label=$(jq -r '.organisation.label // "unknown"' <<< "$api")
@@ -108,19 +116,55 @@ while IFS= read -r api; do
     continue
   fi
 
-  if ! curl -s -f --retry 3 --retry-delay 2 \
-    -H "X-Api-Key: $API_KEY" \
-    -o "$spec_path" \
-    "$api_base/apis/$id/oas/3.1.json" < /dev/null 2>/dev/null; then
-    rm -f "$spec_path"
-    echo "Error: failed to fetch $title ($id) after retries" >&2
-    exit 1
-  fi
-  echo "  ($current/$api_count) $title ($id)"
-  fetched=$((fetched + 1))
+  urls+=("$api_base/apis/$id/oas/3.1.json")
+  paths+=("$spec_path")
+  labels+=("$title ($id)")
 done < <(jq -c '.[]' "$all_apis")
 
 rm -f "$all_apis"
+total=${#urls[@]}
+
+if [ "$total" -eq 0 ]; then
+  echo "Nothing to fetch (cached: $cached)."
+  exit 0
+fi
+
+# ── Download in batches ──────────────────────────────────────────────────
+
+echo "Downloading $total specs ($jobs parallel, cached: $cached) ..."
+
+completed=0
+for ((i = 0; i < total; i += jobs)); do
+  batch_size=$((total - i))
+  if [ "$batch_size" -gt "$jobs" ]; then
+    batch_size=$jobs
+  fi
+
+  for ((j = i; j < i + batch_size; j++)); do
+    echo "  - ${labels[j]}"
+  done
+
+  pids=()
+  for ((j = i; j < i + batch_size; j++)); do
+    curl -s -f --retry 3 --retry-delay 2 \
+      -H "X-Api-Key: $API_KEY" \
+      -o "${paths[j]}" \
+      "${urls[j]}" 2>/dev/null &
+    pids+=($!)
+  done
+
+  for k in "${!pids[@]}"; do
+    if ! wait "${pids[k]}"; then
+      idx=$((i + k))
+      rm -f "${paths[idx]}"
+      echo "Error: failed to fetch ${labels[idx]} after retries" >&2
+      exit 1
+    fi
+  done
+
+  completed=$((completed + batch_size))
+  echo "  ($completed/$total)"
+done
 
 echo ""
-echo "Done. Fetched: $fetched, cached: $cached"
+echo "Done. Fetched: $total, cached: $cached"
