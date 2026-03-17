@@ -28,38 +28,84 @@ if ! command -v npx > /dev/null 2>&1; then
   exit 1
 fi
 
-spec_count=$(find "$specs_dir" -name 'openapi.json' -type f | wc -l | tr -d ' ')
-if [ "$spec_count" -eq 0 ]; then
+if command -v nproc > /dev/null 2>&1; then
+  jobs=$(nproc)
+elif sysctl -n hw.ncpu > /dev/null 2>&1; then
+  jobs=$(sysctl -n hw.ncpu)
+else
+  jobs=4
+fi
+
+# Build list of specs to process
+specs=()
+while IFS= read -r spec; do
+  specs+=("$spec")
+done < <(find "$specs_dir" -name 'openapi.json' -type f | sort)
+
+total=${#specs[@]}
+if [ "$total" -eq 0 ]; then
   echo "Error: no openapi.json files found in $specs_dir" >&2
   exit 1
 fi
 
-echo "Splitting $spec_count specs from $specs_dir into $output_dir ..."
+# Ensure redocly is cached before parallel runs
+echo "Installing redocly ..."
+npx -y @redocly/cli --version > /dev/null 2>&1
 
-split_count=0
+echo "Splitting $total specs ($jobs parallel) ..."
 
-while IFS= read -r spec; do
-  rel="${spec#"$specs_dir"/}"
+split_one() {
+  local spec="$1" specs_dir="$2" output_dir="$3"
+  local rel="${spec#"$specs_dir"/}"
+  local api_dir
   api_dir=$(dirname "$rel")
-  outdir="$output_dir/$api_dir"
-
+  local outdir="$output_dir/$api_dir"
+  local tmpdir
   tmpdir=$(mktemp -d)
+
   if ! npx -y @redocly/cli split "$spec" --outDir="$tmpdir" > /dev/null 2>&1; then
-    echo "Error: failed to split $api_dir" >&2
     rm -rf "$tmpdir"
-    exit 1
+    return 1
   fi
 
   mkdir -p "$outdir"
   if [ -d "$tmpdir/components/schemas" ]; then
-    mv "$tmpdir/components/schemas"/* "$outdir/"
+    mv "$tmpdir/components/schemas"/* "$outdir/" 2>/dev/null || true
   fi
   rm -rf "$tmpdir"
+}
 
-  split_count=$((split_count + 1))
-  schema_count=$(find "$outdir" -name '*.json' -type f 2>/dev/null | wc -l | tr -d ' ')
-  echo "  ($split_count/$spec_count) $api_dir ($schema_count schemas)"
-done < <(find "$specs_dir" -name 'openapi.json' -type f | sort)
+completed=0
+for ((i = 0; i < total; i += jobs)); do
+  batch_size=$((total - i))
+  if [ "$batch_size" -gt "$jobs" ]; then
+    batch_size=$jobs
+  fi
+
+  batch_labels=()
+  for ((j = i; j < i + batch_size; j++)); do
+    rel="${specs[j]#"$specs_dir"/}"
+    api_dir=$(dirname "$rel")
+    batch_labels+=("$api_dir")
+    echo "  - $api_dir"
+  done
+
+  pids=()
+  for ((j = i; j < i + batch_size; j++)); do
+    split_one "${specs[j]}" "$specs_dir" "$output_dir" &
+    pids+=($!)
+  done
+
+  for k in "${!pids[@]}"; do
+    if ! wait "${pids[k]}"; then
+      echo "Error: failed to split ${batch_labels[k]}" >&2
+      exit 1
+    fi
+  done
+
+  completed=$((completed + batch_size))
+  echo "  ($completed/$total)"
+done
 
 echo ""
-echo "Done. Split $split_count specs into $output_dir/"
+echo "Done. Split $total specs into $output_dir/"
