@@ -112,7 +112,8 @@ done
 # and "wijzigingsgebeurtenis" as separate schemas. On macOS (case-insensitive FS)
 # one silently overwrites the other, but on Linux both files exist and Sourcemeta
 # ONE cannot register them as they map to the same lowercase URL.
-rm -f "$output_dir"/logius/api-overheidsorganisaties/*/wijzigingsgebeurtenis.json
+find "$output_dir/logius/api-overheidsorganisaties" -name 'wijzigingsgebeurtenis.json' \
+  ! -name 'Wijzigingsgebeurtenis.json' -delete 2>/dev/null || true
 
 # Fix $ref paths that redocly split doesn't rewrite.
 # These are nested refs like #/components/schemas/Foo/properties/bar
