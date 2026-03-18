@@ -1,5 +1,6 @@
 RMRF ?= rm -rf
 SHELLCHECK ?= shellcheck
+DOCKER ?= docker
 
 .PHONY: lint
 lint:
@@ -15,7 +16,11 @@ schemas: scripts/schemas.sh
 
 .PHONY: one
 one:
-	docker build --tag overheid . --file Dockerfile --progress plain
+	$(DOCKER) build --tag overheid . --file Dockerfile --progress plain
+
+.PHONY: one-dev
+one-dev: one
+	$(DOCKER) run --rm --publish 8000:8000 overheid
 
 .PHONY: clean
 clean:
