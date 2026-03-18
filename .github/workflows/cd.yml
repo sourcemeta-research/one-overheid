@@ -1,0 +1,46 @@
+name: Overheid CD
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: overheid-cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: make lint
+      - run: make fetch
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+      - run: make schemas
+      - run: tree build
+
+      - uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/one-overheid
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
