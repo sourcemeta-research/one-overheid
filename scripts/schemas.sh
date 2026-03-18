@@ -107,5 +107,26 @@ for ((i = 0; i < total; i += jobs)); do
   echo "  ($completed/$total)"
 done
 
+# Work around case-insensitive collision that redocly split doesn't handle.
+# The logius/api-overheidsorganisaties spec defines both "Wijzigingsgebeurtenis"
+# and "wijzigingsgebeurtenis" as separate schemas. On macOS (case-insensitive FS)
+# one silently overwrites the other, but on Linux both files exist and Sourcemeta
+# ONE cannot register them as they map to the same lowercase URL.
+find "$output_dir/logius/api-overheidsorganisaties" -name 'wijzigingsgebeurtenis.json' \
+  ! -name 'Wijzigingsgebeurtenis.json' -delete 2>/dev/null || true
+
+# Fix $ref paths that redocly split doesn't rewrite.
+# These are nested refs like #/components/schemas/Foo/properties/bar
+# that should be either self-refs (#/properties/bar) or cross-refs
+# (./Foo.json#/properties/bar).
+echo "Fixing unresolved \$ref paths ..."
+grep -rl '"#/components/schemas/' "$output_dir" 2>/dev/null | while IFS= read -r file; do
+  base=$(basename "$file" .json)
+  # Self-references: strip #/components/schemas/BASENAME prefix
+  sed -i.bak "s|\"#/components/schemas/${base}/|\"#/|g" "$file" && rm -f "$file.bak"
+  # Cross-references: rewrite to relative file path
+  sed -i.bak -E 's|"#/components/schemas/([^/"]+)/|"./\1.json#/|g' "$file" && rm -f "$file.bak"
+done
+
 echo ""
 echo "Done. Split $total specs into $output_dir/"

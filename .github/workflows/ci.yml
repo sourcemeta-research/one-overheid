@@ -21,3 +21,4 @@ jobs:
           API_KEY: ${{ secrets.API_KEY }}
       - run: make schemas
       - run: tree build
+      - run: make one
