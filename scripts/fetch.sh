@@ -116,7 +116,7 @@ while IFS= read -r api; do
     continue
   fi
 
-  urls+=("$api_base/apis/$id/oas/3.1.json")
+  urls+=("$api_base/apis/$id/oas/3.0.json")
   paths+=("$spec_path")
   labels+=("$title ($id)")
 done < <(jq -c '.[]' "$all_apis")
