@@ -1,0 +1,12 @@
+{
+  "url": "http://localhost:8000",
+  "html": {
+    "name": "Overheid"
+  },
+  "contents": {
+    "schemas": {
+      "path": "./schemas",
+      "defaultDialect": "http://json-schema.org/draft-04/schema#"
+    }
+  }
+}

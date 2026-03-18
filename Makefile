@@ -13,6 +13,10 @@ fetch: scripts/fetch.sh
 schemas: scripts/schemas.sh
 	./$< ./build/specs ./build/schemas
 
+.PHONY: one
+one:
+	docker build --tag overheid . --file Dockerfile --progress plain
+
 .PHONY: clean
 clean:
 	$(RMRF) build

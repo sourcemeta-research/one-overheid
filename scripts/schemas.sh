@@ -107,5 +107,18 @@ for ((i = 0; i < total; i += jobs)); do
   echo "  ($completed/$total)"
 done
 
+# Fix $ref paths that redocly split doesn't rewrite.
+# These are nested refs like #/components/schemas/Foo/properties/bar
+# that should be either self-refs (#/properties/bar) or cross-refs
+# (./Foo.json#/properties/bar).
+echo "Fixing unresolved \$ref paths ..."
+for file in $(grep -rl '"#/components/schemas/' "$output_dir" 2>/dev/null); do
+  base=$(basename "$file" .json)
+  # Self-references: strip #/components/schemas/BASENAME prefix
+  sed -i.bak "s|\"#/components/schemas/${base}/|\"#/|g" "$file" && rm -f "$file.bak"
+  # Cross-references: rewrite to relative file path
+  sed -i.bak -E 's|"#/components/schemas/([^/"]+)/|"./\1.json#/|g' "$file" && rm -f "$file.bak"
+done
+
 echo ""
 echo "Done. Split $total specs into $output_dir/"
